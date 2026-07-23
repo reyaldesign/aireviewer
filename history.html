@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Previous Reviews — AI Image Reviewer</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-mark">◆</span>
+    <h1>AI Image Reviewer</h1>
+  </div>
+  <nav class="app-nav">
+    <a href="/">Review</a>
+    <a href="/history.html" class="active">Previous Reviews</a>
+    <a href="/clients.html">Manage Clients</a>
+  </nav>
+  <div class="header-right"></div>
+</header>
+
+<main class="layout">
+
+  <aside class="sidebar">
+    <section class="panel">
+      <h2>Filter</h2>
+      <p class="hint">Show saved reviews for a specific client, or all of them.</p>
+      <select id="history-client-filter" class="select-input">
+        <option value="">All clients</option>
+      </select>
+      <div id="history-category-filter-wrap" class="field-group-inline" hidden>
+        <label class="field-label" for="history-category-filter">Image type</label>
+        <select id="history-category-filter" class="select-input">
+          <option value="">All categories</option>
+        </select>
+      </div>
+    </section>
+  </aside>
+
+  <section class="content">
+    <div id="history-empty-state" class="empty-state">
+      <p>No saved reviews yet. Review some images on the main page &mdash; they'll show up here and survive a server restart.</p>
+    </div>
+    <div id="history-gallery" class="gallery"></div>
+  </section>
+
+  <aside id="detail-panel" class="detail-panel" hidden>
+    <button id="detail-close" class="detail-close" aria-label="Close">&times;</button>
+    <div id="detail-body"></div>
+  </aside>
+
+</main>
+
+<script src="js/detailView.js"></script>
+<script src="js/history.js"></script>
+</body>
+</html>

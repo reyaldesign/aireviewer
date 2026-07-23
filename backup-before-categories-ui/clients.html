@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manage Clients — AI Image Reviewer</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-mark">◆</span>
+    <h1>AI Image Reviewer</h1>
+  </div>
+  <div class="header-right">
+    <nav class="app-nav">
+      <a href="/">Review</a>
+      <a href="/history.html">Previous Reviews</a>
+      <a href="/clients.html" class="active">Manage Clients</a>
+    </nav>
+  </div>
+</header>
+
+<main class="clients-layout">
+
+  <aside class="panel">
+    <h2>Clients</h2>
+    <p class="hint">Each client has their own saved criteria and branding logo, used automatically when selected on the Review page.</p>
+    <ul id="client-list" class="client-list"></ul>
+    <form id="new-client-form" class="criteria-form">
+      <input type="text" id="new-client-name" placeholder="New client name&hellip;" autocomplete="off">
+      <button type="submit" class="btn btn-secondary">Add</button>
+    </form>
+  </aside>
+
+  <section id="client-detail" class="panel client-detail">
+    <p class="hint">Select a client on the left, or add a new one, to manage their criteria and branding.</p>
+  </section>
+
+</main>
+
+<script src="js/clients.js"></script>
+</body>
+</html>

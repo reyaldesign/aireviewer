@@ -1,0 +1,38 @@
+#!/bin/bash
+# Git post-receive hook: makes `git push production main` deploy the app,
+# same workflow as the git-push-to-deploy you were after with Heroku.
+#
+# Install on the VPS (DigitalOcean Droplet, DreamHost VPS, etc.):
+#   mkdir -p ~/reviewer.git && cd ~/reviewer.git && git init --bare
+#   cp this file to ~/reviewer.git/hooks/post-receive
+#   chmod +x ~/reviewer.git/hooks/post-receive
+#
+# Then from your local machine:
+#   git remote add production ssh://youruser@your.server.ip/~/reviewer.git
+#   git push production main
+#
+# Replace REPLACE_WITH_APP_DIR and REPLACE_WITH_SERVICE_NAME below.
+
+set -e
+
+APP_DIR="REPLACE_WITH_APP_DIR"
+SERVICE_NAME="REPLACE_WITH_SERVICE_NAME"   # e.g. gunicorn-reviewer
+BRANCH="main"
+
+mkdir -p "$APP_DIR"
+
+echo "==> Checking out latest $BRANCH into $APP_DIR"
+git --work-tree="$APP_DIR" --git-dir="$HOME/reviewer.git" checkout -f "$BRANCH"
+
+echo "==> Installing dependencies"
+cd "$APP_DIR"
+if [ ! -d venv ]; then
+  python3 -m venv venv
+fi
+source venv/bin/activate
+pip install -q -r requirements.txt
+
+echo "==> Restarting service"
+systemctl --user restart "$SERVICE_NAME"
+
+echo "==> Deploy complete."
