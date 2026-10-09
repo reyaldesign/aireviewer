@@ -1,180 +1,92 @@
-/**
- * history.js
- * ----------
- * UI wiring for the Previous Reviews page: lists saved reviews (from the
- * SQLite-backed /api/reviews endpoint), lets you filter by client, and
- * opens the same detail view used on the main Review page (via
- * detailView.js) with a delete option added.
- */
-
+/** history.js: saved reviews, grouped by day, with status / client / category / name filters. */
 (() => {
-  const clientFilter = document.getElementById('history-client-filter');
-  const categoryFilterWrap = document.getElementById('history-category-filter-wrap');
-  const categoryFilter = document.getElementById('history-category-filter');
-  const emptyState = document.getElementById('history-empty-state');
-  const galleryEl = document.getElementById('history-gallery');
-  const detailPanel = document.getElementById('detail-panel');
-  const detailBody = document.getElementById('detail-body');
-  const detailClose = document.getElementById('detail-close');
-
-  const STATUS_CLASS = {
-    approved: 'status-approved',
-    rejected: 'status-rejected',
-    needs_review: 'status-review',
-  };
+  const { h, V, vk, V_TO_KEY } = UI;
+  const $ = (id) => document.getElementById(id);
+  UI.mountShell('history');
 
   let reviews = [];
+  const f = { status: 'all', client: '', category: '', q: '' };
 
-  async function loadClientOptions() {
-    try {
-      const res = await fetch('api/clients');
-      if (!res.ok) return;
-      const clients = await res.json();
-      clients.forEach((c) => {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = c.name;
-        clientFilter.appendChild(opt);
-      });
-    } catch (err) {
-      // Silent — filter just won't have client options.
-    }
+  const dayKey = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+  function dayLabel(iso) {
+    const d = new Date(iso), now = new Date();
+    const diff = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+  }
+  const clientName = (r) => r.client_name_snapshot || 'No client';
+  const catName = (r) => r.category_name_snapshot || 'No category';
+
+  function renderStatus() {
+    const defs = [['all', 'All', 'var(--muted)'], ['ready', 'Ready', V.ready.color], ['needs', 'Needs revisions', V.needs.color], ['fails', 'Fails', V.fails.color]];
+    $('status').replaceChildren(...defs.map(([k, label, dot]) =>
+      h('button', { type: 'button', class: f.status === k ? 'on' : '', onclick: () => { f.status = k; renderStatus(); renderDays(); } }, h('i', { style: `background:${dot}` }), label)));
   }
 
-  // Categories are per-client, so the category filter only makes sense once
-  // a specific client is chosen — it repopulates from that client's list.
-  async function refreshCategoryFilter() {
-    const clientId = clientFilter.value;
-    categoryFilter.innerHTML = '<option value="">All categories</option>';
-    categoryFilter.value = '';
-
-    if (!clientId) {
-      categoryFilterWrap.hidden = true;
-      return;
-    }
-
-    try {
-      const res = await fetch(`api/clients/${clientId}/categories`);
-      if (!res.ok) return;
-      const categories = await res.json();
-      categories.forEach((cat) => {
-        const opt = document.createElement('option');
-        opt.value = cat.id;
-        opt.textContent = cat.name;
-        categoryFilter.appendChild(opt);
-      });
-      categoryFilterWrap.hidden = categories.length === 0;
-    } catch (err) {
-      categoryFilterWrap.hidden = true;
-    }
+  function fillSelect(sel, allLabel, values, current) {
+    sel.replaceChildren(h('option', { value: '' }, allLabel), ...values.map((v) => h('option', { value: v }, v)));
+    sel.value = current;
   }
 
-  async function loadReviews() {
-    const clientId = clientFilter.value;
-    const categoryId = categoryFilter.value;
-    const params = new URLSearchParams();
-    if (clientId) params.set('client_id', clientId);
-    if (categoryId) params.set('category_id', categoryId);
-    const url = params.toString() ? `api/reviews?${params.toString()}` : 'api/reviews';
-    try {
-      const res = await fetch(url);
-      reviews = res.ok ? await res.json() : [];
-    } catch (err) {
-      reviews = [];
-    }
-    renderGallery();
+  function renderDays() {
+    const shown = reviews.filter((r) =>
+      (f.status === 'all' || vk(r.verdict) === f.status) &&
+      (!f.client || clientName(r) === f.client) && (!f.category || catName(r) === f.category) &&
+      (!f.q || r.original_filename.toLowerCase().includes(f.q)));
+    $('total').textContent = String(reviews.length);
+    $('empty').hidden = shown.length > 0;
+    $('empty').textContent = reviews.length ? 'No reviews match these filters.' : 'No reviews yet. Run a batch on the AI Review page.';
+
+    const groups = new Map();
+    shown.forEach((r) => { const k = dayKey(r.created_at); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+    $('days').replaceChildren(...[...groups.values()].map((items) => {
+      const batches = new Set(items.map((r) => `${clientName(r)}|${catName(r)}`));
+      const n = `${items.length} image${items.length === 1 ? '' : 's'}`;
+      const meta = batches.size === 1 ? `${clientName(items[0])} · ${catName(items[0])} · ${n}` : `${batches.size} batches · ${n}`;
+      return h('div', { class: 'day' },
+        h('div', { class: 'row' }, h('h3', {}, dayLabel(items[0].created_at)), h('span', { class: 'meta' }, meta)),
+        h('div', { class: 'hgrid' }, items.map((r) => {
+          const k = vk(r.verdict);
+          return h('button', { type: 'button', class: 'hcard', onclick: () => open(r) },
+            h('div', { class: 'im', style: `background-image:url("${r.image_url}")` }, h('span', { class: 'badge', style: `background:${V[k].color}` }, String(r.score))),
+            h('div', { class: 'cb' }, h('b', { style: `color:${V[k].color}` }, V[k].label), h('span', { title: r.original_filename }, `${clientName(r)} · ${catName(r)}`)));
+        })));
+    }));
   }
 
-  function formatDate(iso) {
-    try {
-      return new Date(iso).toLocaleString();
-    } catch (err) {
-      return iso;
-    }
-  }
-
-  function renderGallery() {
-    emptyState.hidden = reviews.length > 0;
-    galleryEl.innerHTML = '';
-
-    reviews.forEach((r) => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.addEventListener('click', () => openDetail(r));
-
-      const thumb = document.createElement('img');
-      thumb.className = 'card-thumb';
-      thumb.src = r.image_url;
-      thumb.alt = r.original_filename;
-
-      const body = document.createElement('div');
-      body.className = 'card-body';
-
-      const name = document.createElement('div');
-      name.className = 'card-name';
-      name.textContent = r.original_filename;
-
-      const pill = document.createElement('span');
-      pill.className = `status-pill ${STATUS_CLASS[r.verdict] || 'status-review'}`;
-      pill.textContent = `${DetailView.STATUS_LABELS[r.verdict] || r.verdict} · ${r.score}%`;
-
-      const meta = document.createElement('div');
-      meta.className = 'hint';
-      const metaParts = [r.client_name_snapshot || 'No client'];
-      if (r.category_name_snapshot) metaParts.push(r.category_name_snapshot);
-      metaParts.push(formatDate(r.created_at));
-      meta.textContent = metaParts.join(' · ');
-
-      body.appendChild(name);
-      body.appendChild(pill);
-      body.appendChild(meta);
-      card.appendChild(thumb);
-      card.appendChild(body);
-      galleryEl.appendChild(card);
+  function close() { $('drawer-root').replaceChildren(); }
+  function open(r) {
+    const panel = h('div', { class: 'drawer' }, h('button', { class: 'x', 'aria-label': 'Close', onclick: close }, '×'));
+    const body = h('div', { style: 'display:flex;flex-direction:column;gap:14px;flex:1;min-height:0' });
+    panel.append(body);
+    $('drawer-root').replaceChildren(h('div', { class: 'scrim', onclick: close }), panel);
+    const draw = () => DetailView.render(body, {
+      imageUrl: r.image_url, filename: r.original_filename, score: r.score, vk: vk(r.verdict), summary: r.summary, checks: r.checks,
+      meta: `${clientName(r)} · ${catName(r)} · ${new Date(r.created_at).toLocaleString()}`,
+    }, {
+      override: async (k) => {
+        try { await UI.send('PUT', `api/reviews/${r.id}/verdict`, { verdict: V_TO_KEY[k] }); r.verdict = V_TO_KEY[k]; draw(); renderDays(); }
+        catch (e) { UI.toast(e.message); }
+      },
+      remove: async () => {
+        if (!(await UI.confirm('Delete this review?', 'The image and its result are removed from History. This cannot be undone.'))) return;
+        try { await UI.api(`api/reviews/${r.id}`, { method: 'DELETE' }); reviews = reviews.filter((x) => x.id !== r.id); close(); refreshFilters(); renderDays(); }
+        catch (e) { UI.toast(e.message); }
+      },
     });
+    draw();
   }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
-  function openDetail(r) {
-    const metaParts = [r.client_name_snapshot || 'No client'];
-    if (r.category_name_snapshot) metaParts.push(r.category_name_snapshot);
-    metaParts.push(`Reviewed ${formatDate(r.created_at)}`);
-
-    DetailView.render(detailBody, {
-      imageUrl: r.image_url,
-      filename: r.original_filename,
-      score: r.score,
-      verdict: r.verdict,
-      summary: r.summary,
-      checks: r.checks,
-      actionItems: r.action_items,
-      metaLine: metaParts.join(' · '),
-      footerNote: 'Saved review from history. The criteria used at review time are preserved even if this client\'s criteria have changed since.',
-    });
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn btn-danger';
-    deleteBtn.style.marginTop = '14px';
-    deleteBtn.style.width = '100%';
-    deleteBtn.textContent = 'Delete this review';
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Delete this saved review and its image? This cannot be undone.')) return;
-      await fetch(`api/reviews/${r.id}`, { method: 'DELETE' });
-      detailPanel.hidden = true;
-      await loadReviews();
-    });
-    detailBody.appendChild(deleteBtn);
-
-    detailPanel.hidden = false;
+  function refreshFilters() {
+    fillSelect($('client'), 'All clients', [...new Set(reviews.map(clientName))].sort(), f.client);
+    fillSelect($('category'), 'All categories', [...new Set(reviews.map(catName))].sort(), f.category);
   }
+  $('client').addEventListener('change', (e) => { f.client = e.target.value; renderDays(); });
+  $('category').addEventListener('change', (e) => { f.category = e.target.value; renderDays(); });
+  $('q').addEventListener('input', (e) => { f.q = e.target.value.trim().toLowerCase(); renderDays(); });
 
-  detailClose.addEventListener('click', () => { detailPanel.hidden = true; });
-  clientFilter.addEventListener('change', async () => {
-    await refreshCategoryFilter();
-    await loadReviews();
-  });
-  categoryFilter.addEventListener('change', loadReviews);
-
-  loadClientOptions();
-  loadReviews();
+  renderStatus();
+  UI.api('api/reviews').then((rows) => { reviews = rows; refreshFilters(); renderDays(); }).catch((e) => { $('empty').hidden = false; $('empty').textContent = `Could not load history: ${e.message}`; });
 })();

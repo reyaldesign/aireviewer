@@ -1,159 +1,67 @@
 /**
- * detailView.js
- * -------------
- * Shared renderer for a completed review's detail-panel content. Used by
- * the live review queue (app.js) and the saved review history page
- * (history.js) so both stay visually consistent and don't duplicate this
- * markup-building logic.
+ * detailView.js: the review detail panel, shared by the Review page and History.
+ *
+ * DetailView.render(container, d, actions)
+ *   d: { imageUrl, filename, score, vk ('ready'|'needs'|'fails'), error, summary, checks, meta }
+ *      checks: [{ criterion, status: 'pass'|'warn'|'fail', comment, location? }]
+ *   actions (all optional): { upload(), rerun(), override(vk), remove() }
  */
-
 const DetailView = (() => {
-  const STATUS_LABELS = {
-    approved: 'Approved',
-    rejected: 'Rejected',
-    needs_review: 'Needs Review',
-  };
+  const { h, V, ICON } = UI;
 
-  /**
-   * @param {HTMLElement} container - emptied and filled with the detail markup
-   * @param {Object} data
-   * @param {string} data.imageUrl
-   * @param {string} data.filename
-   * @param {number} data.score
-   * @param {string} data.verdict - 'approved' | 'rejected' | 'needs_review'
-   * @param {string} [data.summary]
-   * @param {Array}  [data.checks] - [{criterion, pass, comment, location}]
-   * @param {Array}  [data.actionItems]
-   * @param {string} [data.metaLine] - optional line under the filename (e.g. client + date)
-   * @param {string} [data.footerNote]
-   */
-  function render(container, data) {
-    container.innerHTML = '';
-
-    let image = document.createElement('img');
-    image.className = 'detail-img';
-    image.src = data.imageUrl;
-    container.appendChild(image);
-
-    const name = document.createElement('p');
-    name.className = 'detail-name';
-    name.textContent = data.filename || '';
-    container.appendChild(name);
-
-    if (data.metaLine) {
-      const meta = document.createElement('p');
-      meta.className = 'hint detail-meta';
-      meta.textContent = data.metaLine;
-      container.appendChild(meta);
-    }
-
-    const score = document.createElement('div');
-    score.className = 'detail-score';
-    score.textContent = `${data.score}%`;
-    container.appendChild(score);
-
-    // Wrap the image so failed-check circle markers can be positioned over it.
-    const imageWrap = document.createElement('div');
-    imageWrap.className = 'detail-img-wrap';
-    image.replaceWith(imageWrap);
-    imageWrap.appendChild(image);
-
-    let markerCount = 0;
-    (data.checks || []).forEach((c) => {
-      if (!c.pass && c.location &&
-          typeof c.location.x === 'number' && typeof c.location.y === 'number') {
-        const marker = document.createElement('div');
-        marker.className = 'issue-marker';
-        marker.style.left = `${c.location.x * 100}%`;
-        marker.style.top = `${c.location.y * 100}%`;
-        marker.title = c.comment || c.criterion;
-        imageWrap.appendChild(marker);
-        markerCount += 1;
+  function image(d) {
+    const wrap = h('div', { class: 'd-img' }, h('img', { src: d.imageUrl, alt: d.filename || '' }));
+    (d.checks || []).forEach((c) => {
+      const l = c.location;
+      if (c.status !== 'pass' && l && typeof l.x === 'number' && typeof l.y === 'number') {
+        wrap.append(h('span', { class: `marker${c.status === 'warn' ? ' warn' : ''}`, style: `left:${l.x * 100}%;top:${l.y * 100}%`, title: c.comment || c.criterion }));
       }
     });
-
-    if (markerCount > 0) {
-      const markerNote = document.createElement('p');
-      markerNote.className = 'hint marker-note';
-      markerNote.textContent = `${markerCount} issue${markerCount > 1 ? 's' : ''} marked on the image above (Claude's estimated location, hover a circle for details).`;
-      container.appendChild(markerNote);
-    }
-
-    const verdict = document.createElement('div');
-    verdict.className = 'detail-verdict';
-    verdict.textContent = `Verdict: ${STATUS_LABELS[data.verdict] || data.verdict}`;
-    container.appendChild(verdict);
-
-    if (data.summary) {
-      const summaryEl = document.createElement('p');
-      summaryEl.className = 'detail-summary';
-      summaryEl.textContent = data.summary;
-      container.appendChild(summaryEl);
-    }
-
-    const checksHeading = document.createElement('h3');
-    checksHeading.className = 'detail-subheading';
-    checksHeading.textContent = 'Criteria breakdown';
-    container.appendChild(checksHeading);
-
-    const list = document.createElement('ul');
-    list.className = 'check-list';
-    (data.checks || []).forEach((c) => {
-      const li = document.createElement('li');
-      li.className = 'check-item';
-
-      const icon = document.createElement('span');
-      icon.className = `check-icon ${c.pass ? 'pass' : 'fail'}`;
-      icon.textContent = c.pass ? '✓' : '✕';
-
-      const textWrap = document.createElement('div');
-      textWrap.className = 'check-text';
-      const strong = document.createElement('strong');
-      strong.textContent = c.criterion;
-      const comment = document.createElement('div');
-      comment.className = 'check-comment';
-      comment.textContent = c.comment;
-      textWrap.appendChild(strong);
-      textWrap.appendChild(comment);
-
-      li.appendChild(icon);
-      li.appendChild(textWrap);
-      list.appendChild(li);
-    });
-    container.appendChild(list);
-
-    const actionItems = (data.actionItems && data.actionItems.length)
-      ? data.actionItems
-      : (data.checks || []).filter(c => !c.pass).map(c => c.comment || c.criterion);
-
-    const actionHeading = document.createElement('h3');
-    actionHeading.className = 'detail-subheading';
-    actionHeading.textContent = 'What needs to be fixed';
-    container.appendChild(actionHeading);
-
-    if (actionItems.length) {
-      const actionList = document.createElement('ul');
-      actionList.className = 'action-list';
-      actionItems.forEach((item) => {
-        const li = document.createElement('li');
-        li.textContent = item;
-        actionList.appendChild(li);
-      });
-      container.appendChild(actionList);
-    } else {
-      const okNote = document.createElement('p');
-      okNote.className = 'hint';
-      okNote.textContent = 'No issues found, this image meets all criteria.';
-      container.appendChild(okNote);
-    }
-
-    if (data.footerNote) {
-      const note = document.createElement('div');
-      note.className = 'detail-note';
-      note.textContent = data.footerNote;
-      container.appendChild(note);
-    }
+    return wrap;
   }
 
-  return { render, STATUS_LABELS };
+  function render(container, d, actions = {}) {
+    container.replaceChildren();
+    const v = V[d.vk];
+    const fixes = (d.checks || []).filter((c) => c.status !== 'pass');
+
+    container.append(image(d));
+    container.append(h('div', { class: 'd-head' },
+      h('div', { style: 'display:grid;gap:4px;min-width:0' },
+        h('span', { class: 'fname', style: 'color:var(--muted)', title: d.filename }, d.filename),
+        d.error ? h('span', { class: 'vl fails-c d-vl' }, 'Review failed')
+                : h('span', { class: 'vl', style: `color:${v.color}` }, v.label)),
+      d.error ? null : h('span', { class: 'sc' }, String(d.score), h('small', {}, '/100'))));
+    if (d.meta) container.append(h('div', { class: 'meta' }, d.meta));
+    if (d.summary) container.append(h('p', { class: 'd-sum' }, d.summary));
+
+    if (!d.error) {
+      container.append(h('div', { class: 'checks' }, (d.checks || []).map((c) =>
+        h('div', { class: 'check' },
+          h('span', { class: `ic ${c.status}` }, ICON[c.status]),
+          h('div', {}, h('b', {}, c.criterion), h('span', {}, c.comment))))));
+    }
+
+    const main = [];
+    if (!d.error && d.vk === 'ready') {
+      main.push(h('button', { class: 'btn red lg', disabled: true, title: 'Becomes available when AI Review moves into Reyal Proof' }, 'Send to proofing →'));
+    } else if (!d.error && actions.upload) {
+      main.push(h('button', { class: 'btn white lg', onclick: actions.upload }, 'Upload fixed version'));
+    } else if (d.error && actions.rerun) {
+      main.push(h('button', { class: 'btn white lg', onclick: actions.rerun }, 'Re-run review'));
+    }
+
+    const links = [];
+    if (!d.error) links.push(h('button', { class: 'link', onclick: () => UI.copy(UI.fixList(d.filename, d.checks), fixes.length ? 'Fix list copied' : 'Nothing to fix, copied note') }, 'Copy fix list'));
+    if (!d.error && actions.rerun) links.push(h('button', { class: 'link', onclick: actions.rerun }, 'Re-run review'));
+    const overrideRow = h('div', { class: 'override', hidden: true },
+      ['ready', 'needs', 'fails'].filter((k) => k !== d.vk).map((k) =>
+        h('button', { class: 'btn ghost', style: `color:${V[k].color}`, onclick: () => actions.override(k) }, V[k].label)));
+    if (!d.error && actions.override) links.push(h('button', { class: 'link', onclick: () => { overrideRow.hidden = !overrideRow.hidden; } }, 'Override verdict'));
+    if (actions.remove) links.push(h('button', { class: 'link danger', onclick: actions.remove }, 'Delete'));
+
+    container.append(h('div', { class: 'd-actions' }, main, h('div', { class: 'd-links' }, links), overrideRow));
+  }
+
+  return { render };
 })();

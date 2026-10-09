@@ -1,114 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Image Reviewer</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Urbanist:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-
-<header class="app-header">
-  <div class="brand">
-    <span class="brand-mark">◆</span>
-    <h1>AI Image Reviewer</h1>
-  </div>
-  <nav class="app-nav">
-    <a href="./" class="active">Review</a>
-    <a href="history.html">Previous Reviews</a>
-    <a href="clients.html">Manage Clients</a>
-  </nav>
-  <div class="header-right">
-    <div class="stub-badge" id="ai-status-badge" title="Live status of the AI reviewer backend.">
-      Checking AI status&hellip;
-    </div>
-  </div>
-</header>
-
-<main class="layout">
-
-  <!-- SIDEBAR: criteria + upload -->
-  <aside class="sidebar">
-    <section class="panel">
-      <h2>Client</h2>
-      <p class="hint">Select a client to auto-load their saved criteria and branding for this batch.</p>
-      <select id="client-select" class="select-input">
-        <option value="">No client (use criteria below)</option>
-      </select>
-      <div id="client-logo-preview" class="client-logo-preview" hidden>
-        <img id="client-logo-img" alt="Client logo">
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <main class="review">
+    <section class="left">
+      <div class="row between">
+        <h1>AI Review</h1>
+        <div class="row">
+          <a class="btn ghost" href="history.html">History</a>
+          <button class="btn red" id="new-batch" type="button">+ New batch</button>
+        </div>
       </div>
-      <div id="category-select-wrap" class="field-group-inline" hidden>
-        <label class="field-label" for="category-select">Image type</label>
-        <select id="category-select" class="select-input">
-          <option value="">Choose a category&hellip;</option>
-        </select>
+
+      <div class="card bar" id="bar">
+        <span id="bar-tile"></span>
+        <label class="tile-select"><span>Client</span><select id="client-select"></select></label>
+        <label class="tile-select"><span>Category</span><select id="category-select" disabled></select></label>
+        <div style="display:grid;gap:1px;min-width:0;flex:1">
+          <span class="meta" id="bar-meta">Choose a client and category to load the criteria.</span>
+        </div>
+        <a class="link" id="edit-criteria" href="clients.html" hidden>Edit criteria</a>
       </div>
-    </section>
 
-    <section class="panel">
-      <h2>Review Criteria</h2>
-      <p class="hint">Define what the AI should check for. Edit, remove, or add rules.</p>
-      <ul id="criteria-list" class="criteria-list"></ul>
-      <form id="criteria-form" class="criteria-form">
-        <input type="text" id="criteria-input" placeholder="Add a new criterion&hellip;" autocomplete="off">
-        <button type="submit" class="btn btn-secondary">Add</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <h2>Images</h2>
-      <p class="hint">Upload a folder or select files from your computer.</p>
-      <label class="upload-drop" id="upload-drop">
-        <input type="file" id="file-input" accept="image/*" multiple hidden>
-        <span class="upload-drop-icon">⬆</span>
-        <span>Drag &amp; drop images here, or click to browse</span>
-      </label>
-      <div class="upload-actions">
-        <label class="link-btn">
-          <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
-          Select a folder instead
-        </label>
+      <div class="row" style="flex-wrap:wrap">
+        <div class="drop" id="drop">
+          <span id="drop-text">Drop images or a folder</span>
+          <button class="link" id="pick-files" type="button">Choose images</button>
+          <button class="link" id="pick-folder" type="button">Choose folder</button>
+        </div>
+        <button class="btn red" id="review-btn" type="button" style="height:50px;padding:0 22px;font-size:14px" disabled>Review images</button>
       </div>
+      <input type="file" id="file-input" accept="image/*" multiple hidden>
+      <input type="file" id="folder-input" accept="image/*" webkitdirectory multiple hidden>
+      <input type="file" id="fix-input" accept="image/*" hidden>
+
+      <div class="tally" id="tally" hidden></div>
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty">Add images above, then press Review. Each image is graded against the client's criteria.</div>
     </section>
-
-    <section class="panel">
-      <button id="review-all-btn" class="btn btn-primary" disabled>Review All Images</button>
-      <div id="progress-wrap" class="progress-wrap" hidden>
-        <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-        <span id="progress-label" class="progress-label">0 / 0</span>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Token Usage</h2>
-      <div class="usage-stats">
-        <div class="usage-row"><span>Requests</span><span id="usage-requests">0</span></div>
-        <div class="usage-row"><span>Input tokens</span><span id="usage-input">0</span></div>
-        <div class="usage-row"><span>Output tokens</span><span id="usage-output">0</span></div>
-        <div class="usage-row usage-cost"><span>Est. cost</span><span id="usage-cost">$0.00</span></div>
-      </div>
-      <p class="hint usage-note">Resets when the server restarts. Estimated from current list pricing for the connected model.</p>
-    </section>
-  </aside>
-
-  <!-- MAIN: queue + detail -->
-  <section class="content">
-    <div id="empty-state" class="empty-state">
-      <p>No images yet. Upload some to get started &mdash; the AI reviewer will grade each one against your criteria.</p>
-    </div>
-
-    <div id="gallery" class="gallery"></div>
-  </section>
-
-  <!-- DETAIL PANEL -->
-  <aside id="detail-panel" class="detail-panel" hidden>
-    <button id="detail-close" class="detail-close" aria-label="Close">&times;</button>
-    <div id="detail-body"></div>
-  </aside>
-
-</main>
-
+    <aside class="detail" id="detail"></aside>
+  </main>
+</div>
+<script src="js/common.js"></script>
 <script src="js/reviewEngine.js"></script>
 <script src="js/detailView.js"></script>
 <script src="js/app.js"></script>

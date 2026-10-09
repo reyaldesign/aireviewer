@@ -3,6 +3,16 @@
 A browser-based tool where Claude reviews uploaded images against a custom
 checklist you define, instead of a human reviewing them manually.
 
+## Screens (new UI)
+
+Built from the Reyal Proof design handoff (option 1a). All URLs are relative, so it runs at `/` or under `/aireviewer/`.
+
+- **AI Review** (`index.html`): pick client and category, drop images, review the batch. Results are a grid with a detail panel. Verdicts: Ready for proofing (80+), Needs revisions (50-79), Fails (under 50). Each criterion is pass, warn or fail.
+- **History** (`history.html`): saved reviews grouped by day, filter by status, client, category, or file name.
+- **Clients** (`clients.html`): per-client criteria. Criteria for every category sit on top, each category adds its own. Drag to reorder.
+- "Send to proofing" is shown but disabled until this lives inside Reyal Proof.
+- Criteria saved before this version are one long line per category. Re-enter them as separate rows on the Clients screen.
+
 ## What it does
 
 - Upload images (file picker, folder select, or drag-and-drop).

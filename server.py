@@ -101,6 +101,8 @@ def health():
         "connected": client is not None,
         "model": MODEL,
         "key_configured": bool(API_KEY),
+        "ready_at": READY_AT,
+        "needs_at": NEEDS_AT,
     }
 
 
@@ -246,6 +248,28 @@ def api_add_criterion(category_id: int, body: CriterionCreate):
     return db.add_criterion(category_id, text)
 
 
+class CriteriaOrder(BaseModel):
+    ids: List[int]
+
+
+@app.put("/api/criteria/order")
+def api_order_criteria(body: CriteriaOrder):
+    """Saves the drag-and-drop order of a list of criteria (ids in display order)."""
+    db.set_criteria_order(body.ids)
+    return {"updated": True}
+
+
+@app.post("/api/clients/{client_id}/criteria")
+def api_add_base_criterion(client_id: int, body: CriterionCreate):
+    """A criterion checked in every category of this client."""
+    if not db.get_client(client_id):
+        raise HTTPException(status_code=404, detail="Client not found.")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Criterion text is required.")
+    return db.add_base_criterion(client_id, text)
+
+
 @app.put("/api/criteria/{criterion_id}")
 def api_update_criterion(criterion_id: int, body: CriterionUpdate):
     db.update_criterion(criterion_id, body.text.strip())
@@ -279,11 +303,13 @@ SYSTEM_PROMPT = (
     "criterion relates to text, spelling, wording, or labels, transcribe the "
     "exact text visible in the image as precisely as you can before judging "
     "it — do not assume or guess what the text says.\n"
-    "2. For EACH criterion, decide pass or fail based only on what you "
-    "directly observed in step 1, and give a one-sentence comment explaining "
+    "2. For EACH criterion, give a status based only on what you directly "
+    "observed in step 1: \"pass\" (clearly met), \"warn\" (met, but with a "
+    "minor weakness a designer should look at, such as small or low-contrast "
+    "text), or \"fail\" (not met). Add a one-sentence comment explaining "
     "why. If a detail is unclear or ambiguous, look again rather than "
     "assuming it is correct.\n"
-    "3. For each criterion that FAILS, also estimate WHERE in the image the "
+    "3. For each criterion that is \"warn\" or \"fail\", also estimate WHERE in the image the "
     "problem is visually located, if it corresponds to a specific spot "
     "(such as a misspelled word, a particular object, or a specific area) "
     "rather than a property of the whole image (such as overall blur or "
@@ -294,36 +320,45 @@ SYSTEM_PROMPT = (
     "visual estimate, not a precise measurement — do your best but it is "
     "OK to be approximate. If the issue does not correspond to a specific "
     "location, omit the \"location\" field entirely for that check.\n"
-    "4. Compute an overall score from 0-100 based on the proportion of "
-    "criteria passed, and an overall verdict: 'approved' if score >= 80, "
-    "'needs_review' if score is between 50 and 79, or 'rejected' if score < "
-    "50.\n\n"
+    "4. Compute an overall score from 0-100: each pass counts fully, each "
+    "warn counts half, each fail counts zero, averaged over all criteria. "
+    "The verdict is derived from your score afterwards, so do not include one.\n\n"
     "Keep your reasoning concise — a few sentences of observation is enough, "
     "you do not need to write a long essay before answering.\n\n"
     "Also include a \"summary\" field: 1-3 sentences in plain language "
-    "explaining WHY you reached this verdict, referencing the specific "
+    "explaining WHY you reached this score, referencing the specific "
     "criteria that drove the decision.\n\n"
     "Also include an \"action_items\" field: a list of short, concrete "
     "strings describing exactly what needs to be fixed for this image to "
-    "pass review. Base this only on criteria that failed. Use an empty list "
-    "if the verdict is 'approved' and nothing needs fixing.\n\n"
+    "pass review. Base this only on criteria that are warn or fail. Use an "
+    "empty list if every criterion passes.\n\n"
     "Respond with ONLY valid JSON, no markdown code fences, no extra "
     "commentary, in exactly this shape (the \"location\" field is optional "
     "per check and should be omitted, not null, when there isn't one):\n"
-    '{"score": <int 0-100>, "verdict": "approved|needs_review|rejected", '
+    '{"score": <int 0-100>, '
     '"summary": "<string>", "action_items": ["<string>", ...], '
-    '"checks": [{"criterion": "<string>", "pass": <bool>, "comment": '
+    '"checks": [{"criterion": "<string>", "status": "pass|warn|fail", "comment": '
     '"<string>", "location": {"x": <0.0-1.0>, "y": <0.0-1.0>}}]}'
 )
+
+
+# Verdict keys are stored as approved / needs_review / rejected; the UI shows
+# them as Ready for proofing / Needs revisions / Fails.
+READY_AT, NEEDS_AT = 80, 50
+
+
+def verdict_for(score: int) -> str:
+    return "approved" if score >= READY_AT else "needs_review" if score >= NEEDS_AT else "rejected"
 
 
 def fallback_result(message: str) -> dict:
     return {
         "score": 0,
         "verdict": "needs_review",
+        "error": True,
         "summary": message,
         "action_items": [],
-        "checks": [{"criterion": "AI review", "pass": False, "comment": message}],
+        "checks": [{"criterion": "AI review", "status": "fail", "pass": False, "comment": message}],
     }
 
 
@@ -343,9 +378,13 @@ def sanitize_checks(checks: list) -> list:
     for c in checks if isinstance(checks, list) else []:
         if not isinstance(c, dict):
             continue
+        status = c.get("status")
+        if status not in ("pass", "warn", "fail"):
+            status = "pass" if c.get("pass") else "fail"
         entry = {
             "criterion": c.get("criterion", ""),
-            "pass": bool(c.get("pass", False)),
+            "status": status,
+            "pass": status == "pass",
             "comment": c.get("comment", ""),
         }
         loc = c.get("location")
@@ -431,12 +470,12 @@ def review_image(req: ReviewRequest):
             block.text for block in message.content if block.type == "text"
         )
         result = extract_json(raw_text)
-        result.setdefault("score", 0)
-        result.setdefault("verdict", "needs_review")
+        result["score"] = max(0, min(100, int(result.get("score") or 0)))
+        result["verdict"] = verdict_for(result["score"])
         result.setdefault("summary", "")
         result.setdefault("action_items", [])
         result["checks"] = sanitize_checks(result.get("checks", []))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError, ValueError):
         result = fallback_result("The AI response could not be parsed as JSON. Try reviewing again.")
 
     # Persist the review + the image itself, so history survives a restart.
@@ -478,7 +517,7 @@ def review_image(req: ReviewRequest):
 
 
 @app.get("/api/reviews")
-def api_list_reviews(client_id: Optional[int] = None, category_id: Optional[int] = None, limit: int = 100):
+def api_list_reviews(client_id: Optional[int] = None, category_id: Optional[int] = None, limit: int = 500):
     reviews = db.list_reviews(limit=limit, client_id=client_id, category_id=category_id)
     return [review_to_response(r) for r in reviews]
 
@@ -489,6 +528,20 @@ def api_get_review(review_id: int):
     if not r:
         raise HTTPException(status_code=404, detail="Review not found.")
     return review_to_response(r)
+
+
+class VerdictOverride(BaseModel):
+    verdict: str  # approved | needs_review | rejected
+
+
+@app.put("/api/reviews/{review_id}/verdict")
+def api_override_verdict(review_id: int, body: VerdictOverride):
+    if body.verdict not in ("approved", "needs_review", "rejected"):
+        raise HTTPException(status_code=400, detail="Unknown verdict.")
+    if not db.get_review(review_id):
+        raise HTTPException(status_code=404, detail="Review not found.")
+    db.update_review_verdict(review_id, body.verdict)
+    return {"updated": True}
 
 
 @app.delete("/api/reviews/{review_id}")

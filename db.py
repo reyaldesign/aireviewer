@@ -101,8 +101,8 @@ def _seed_default_categories(conn, client_id: int):
 
 def _migrate_existing_clients(conn):
     """For clients created before categories existed: seed the default
-    categories if they have none yet, and move any criteria that predate
-    categories into a "General" category so nothing is lost."""
+    categories if they have none yet. Criteria with no category apply to every
+    category."""
     clients = conn.execute("SELECT id FROM clients").fetchall()
     for row in clients:
         client_id = row["id"]
@@ -112,35 +112,6 @@ def _migrate_existing_clients(conn):
         ).fetchone()["c"]
         if cat_count == 0:
             _seed_default_categories(conn, client_id)
-
-        orphaned = conn.execute(
-            "SELECT id FROM criteria WHERE client_id = ? AND category_id IS NULL",
-            (client_id,),
-        ).fetchall()
-        if not orphaned:
-            continue
-
-        general = conn.execute(
-            "SELECT id FROM categories WHERE client_id = ? AND name = 'General'",
-            (client_id,),
-        ).fetchone()
-        if general:
-            general_id = general["id"]
-        else:
-            next_pos = conn.execute(
-                "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM categories WHERE client_id = ?",
-                (client_id,),
-            ).fetchone()["p"]
-            cur = conn.execute(
-                "INSERT INTO categories (client_id, name, position) VALUES (?, 'General', ?)",
-                (client_id, next_pos),
-            )
-            general_id = cur.lastrowid
-
-        conn.execute(
-            "UPDATE criteria SET category_id = ? WHERE client_id = ? AND category_id IS NULL",
-            (general_id, client_id),
-        )
 
 
 def init_db():
@@ -217,6 +188,10 @@ def get_client(client_id: int) -> Optional[dict]:
             cat_dict["criteria"] = [dict(c) for c in crit_rows]
             categories.append(cat_dict)
         client["categories"] = categories
+        client["base_criteria"] = [dict(c) for c in conn.execute(
+            "SELECT * FROM criteria WHERE client_id = ? AND category_id IS NULL ORDER BY position, id",
+            (client_id,),
+        )]
         return client
 
 
@@ -320,6 +295,26 @@ def add_criterion(category_id: int, text: str) -> dict:
         return dict(row)
 
 
+def add_base_criterion(client_id: int, text: str) -> dict:
+    """A criterion that applies to every category of this client."""
+    with get_conn() as conn:
+        next_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM criteria WHERE client_id = ? AND category_id IS NULL",
+            (client_id,),
+        ).fetchone()["p"]
+        cur = conn.execute(
+            "INSERT INTO criteria (client_id, category_id, text, position) VALUES (?, NULL, ?, ?)",
+            (client_id, text, next_pos),
+        )
+        return dict(conn.execute("SELECT * FROM criteria WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def set_criteria_order(ids: list) -> None:
+    with get_conn() as conn:
+        for position, criterion_id in enumerate(ids):
+            conn.execute("UPDATE criteria SET position = ? WHERE id = ?", (position, criterion_id))
+
+
 def update_criterion(criterion_id: int, text: str) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE criteria SET text = ? WHERE id = ?", (text, criterion_id))
@@ -380,6 +375,8 @@ def _row_to_review(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["action_items"] = json.loads(d.pop("action_items_json") or "[]")
     d["checks"] = json.loads(d.pop("checks_json") or "[]")
+    for c in d["checks"]:  # reviews saved before warn existed only have pass true/false
+        c.setdefault("status", "pass" if c.get("pass") else "fail")
     d["criteria_snapshot"] = json.loads(d.pop("criteria_snapshot_json") or "[]")
     return d
 
@@ -406,6 +403,11 @@ def list_reviews(limit: int = 100, client_id=None, category_id=None) -> list:
             f"SELECT * FROM reviews {where} ORDER BY id DESC LIMIT ?", params
         ).fetchall()
         return [_row_to_review(r) for r in rows]
+
+
+def update_review_verdict(review_id: int, verdict: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE reviews SET verdict = ? WHERE id = ?", (verdict, review_id))
 
 
 def delete_review(review_id: int) -> None:

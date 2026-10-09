@@ -1,361 +1,152 @@
 /**
- * clients.js
- * ----------
- * UI wiring for the Manage Clients page: create/edit/delete clients, upload
- * a branding logo, and manage each client's image categories (Reel/Animation,
- * Flyer, etc.) and the criteria saved under each one. These are what
- * auto-loads on the main Review page when that client + category is
- * selected there.
+ * clients.js: a client's AI criteria. Criteria that apply to every category sit on top;
+ * each category adds its own. Rows are editable and drag to reorder.
  */
-
 (() => {
-  const clientListEl = document.getElementById('client-list');
-  const newClientForm = document.getElementById('new-client-form');
-  const newClientNameInput = document.getElementById('new-client-name');
-  const detailEl = document.getElementById('client-detail');
+  const { h, V } = UI;
+  const $ = (id) => document.getElementById(id);
+  UI.mountShell('clients');
 
-  let clients = [];
-  let selectedId = null;
+  const params = new URLSearchParams(location.search);
+  const S = { list: [], client: null, catId: Number(params.get('category')) || null, thr: { ready_at: 80, needs_at: 50 } };
+  const run = (p) => p.catch((e) => UI.toast(e.message));
 
-  async function loadClients() {
-    try {
-      const res = await fetch('api/clients');
-      clients = res.ok ? await res.json() : [];
-    } catch (err) {
-      clients = [];
-    }
-    renderList();
+  async function loadList(selectId) {
+    S.list = await UI.api('api/clients');
+    const id = selectId || (S.client && S.client.id) || Number(params.get('client')) || (S.list[0] && S.list[0].id);
+    await loadClient(S.list.some((c) => c.id === id) ? id : S.list[0] && S.list[0].id);
+  }
+  async function loadClient(id) {
+    S.client = id ? await UI.api(`api/clients/${id}`) : null;
+    if (S.client && !S.client.categories.some((c) => c.id === S.catId)) S.catId = S.client.categories[0] ? S.client.categories[0].id : null;
+    render();
   }
 
-  function renderList() {
-    clientListEl.innerHTML = '';
-    if (!clients.length) {
-      const li = document.createElement('li');
-      li.className = 'hint';
-      li.textContent = 'No clients yet.';
-      clientListEl.appendChild(li);
-      return;
-    }
-    clients.forEach((c) => {
-      const li = document.createElement('li');
-      li.className = 'client-list-item' + (c.id === selectedId ? ' active' : '');
-      li.textContent = c.name;
-      li.addEventListener('click', () => selectClient(c.id));
-      clientListEl.appendChild(li);
-    });
-  }
-
-  newClientForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = newClientNameInput.value.trim();
-    if (!name) return;
-    try {
-      const res = await fetch('api/clients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+  // ---------- criteria rows ----------
+  function critList(items, listKey) {
+    const box = h('div', { class: 'sec', style: 'gap:8px' });
+    let dragEl = null;
+    const saveOrder = () => run(UI.send('PUT', 'api/criteria/order', { ids: [...box.querySelectorAll('[data-id]')].map((r) => Number(r.dataset.id)) }));
+    items.forEach((c) => {
+      const row = h('div', { class: 'crow', 'data-id': c.id, draggable: 'true' },
+        h('span', { class: 'grip', title: 'Drag to reorder' }, '⋮⋮'), h('span', { class: 'txt' }, c.text),
+        h('button', { class: 'link', onclick: () => edit(row, c) }, 'Edit'),
+        h('button', { class: 'link danger', onclick: () => run(UI.api(`api/criteria/${c.id}`, { method: 'DELETE' }).then(() => loadClient(S.client.id))) }, 'Remove'));
+      row.addEventListener('dragstart', (e) => { dragEl = row; row.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; });
+      row.addEventListener('dragend', () => { row.classList.remove('drag'); dragEl = null; saveOrder(); });
+      row.addEventListener('dragover', (e) => {
+        if (!dragEl || dragEl === row || dragEl.parentNode !== box) return;
+        e.preventDefault();
+        const after = e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+        box.insertBefore(dragEl, after ? row.nextSibling : row);
       });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => res.statusText);
-        alert(`Could not create client: ${detail}`);
-        return;
-      }
-      const c = await res.json();
-      newClientNameInput.value = '';
-      await loadClients();
-      selectClient(c.id);
-    } catch (err) {
-      alert(`Could not reach the server: ${err.message}`);
-    }
+      box.append(row);
+    });
+    return box;
+  }
+
+  function edit(row, c) {
+    const input = h('input', { value: c.text });
+    const done = async (save) => {
+      const text = input.value.trim();
+      if (save && text && text !== c.text) await run(UI.send('PUT', `api/criteria/${c.id}`, { text }));
+      loadClient(S.client.id);
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
+    row.replaceChildren(h('span', { class: 'grip' }, '⋮⋮'), input, h('button', { class: 'link', onclick: () => done(true) }, 'Save'), h('button', { class: 'link', onclick: () => done(false) }, 'Cancel'));
+    row.draggable = false; input.focus(); input.select();
+  }
+
+  function addRow(placeholder, onAdd) {
+    const input = h('input', { placeholder });
+    const go = async () => { const text = input.value.trim(); if (!text) return; await run(onAdd(text)); loadClient(S.client.id); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    return h('div', { class: 'addrow' }, input, h('button', { class: 'btn ghost', onclick: go }, 'Add'));
+  }
+
+  // ---------- client / category actions ----------
+  async function newClient() {
+    const name = await UI.ask('New client', '', 'Create', 'Client name');
+    if (name) run(UI.send('POST', 'api/clients', { name }).then((c) => loadList(c.id)));
+  }
+  async function renameClient() {
+    const name = await UI.ask('Rename client', S.client.name);
+    if (name) run(UI.send('PUT', `api/clients/${S.client.id}`, { name }).then(() => loadList(S.client.id)));
+  }
+  async function deleteClient() {
+    if (await UI.confirm(`Delete ${S.client.name}?`, 'Their categories and criteria are deleted too. Saved reviews stay in History.', 'Delete client'))
+      run(UI.api(`api/clients/${S.client.id}`, { method: 'DELETE' }).then(() => { S.client = null; return loadList(); }));
+  }
+  async function addCategory() {
+    const name = await UI.ask('New category', '', 'Add', 'Category name');
+    if (name) run(UI.send('POST', `api/clients/${S.client.id}/categories`, { name }).then((c) => { S.catId = c.id; return loadClient(S.client.id); }));
+  }
+  async function renameCategory(cat) {
+    const name = await UI.ask('Rename category', cat.name);
+    if (name) run(UI.send('PUT', `api/categories/${cat.id}`, { name }).then(() => loadClient(S.client.id)));
+  }
+  async function deleteCategory(cat) {
+    if (await UI.confirm(`Delete ${cat.name}?`, 'Its own criteria are deleted. Criteria for every category are not affected.', 'Delete category'))
+      run(UI.api(`api/categories/${cat.id}`, { method: 'DELETE' }).then(() => loadClient(S.client.id)));
+  }
+  $('logo-input').addEventListener('change', (e) => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file || !S.client) return;
+    const fd = new FormData(); fd.append('file', file);
+    run(UI.api(`api/clients/${S.client.id}/logo`, { method: 'POST', body: fd }).then(() => loadList(S.client.id)));
   });
 
-  async function selectClient(id) {
-    selectedId = id;
-    renderList();
-    try {
-      const res = await fetch(`api/clients/${id}`);
-      if (!res.ok) return;
-      renderDetail(await res.json());
-    } catch (err) {
-      // Silent — detail panel just won't update.
+  // ---------- page ----------
+  function render() {
+    const page = $('page'), c = S.client;
+    if (!c) {
+      page.replaceChildren(h('h1', {}, 'Clients'), h('div', { class: 'empty' }, h('div', { style: 'display:grid;gap:12px;justify-items:center' }, 'No clients yet.', h('button', { class: 'btn red', onclick: newClient }, '+ New client'))));
+      return;
     }
+    const cat = c.categories.find((x) => x.id === S.catId);
+    const total = (x) => c.base_criteria.length + x.criteria.length;
+
+    const header = h('div', { class: 'row between', style: 'align-items:flex-end;flex-wrap:wrap' },
+      h('div', { style: 'display:grid;gap:10px' }, h('span', { class: 'crumb' }, 'Clients /'),
+        h('div', { class: 'row', style: 'gap:14px' }, UI.monogram(c, true), h('h1', {}, c.name))),
+      h('div', { class: 'row', style: 'flex-wrap:wrap' },
+        h('select', { class: 'pill-select', 'aria-label': 'Client', onchange: (e) => run(loadClient(Number(e.target.value))) }, S.list.map((x) => h('option', { value: x.id, selected: x.id === c.id }, x.name))),
+        h('button', { class: 'btn ghost', onclick: newClient }, '+ New client'),
+        h('button', { class: 'link', onclick: renameClient }, 'Rename'),
+        h('button', { class: 'link danger', onclick: deleteClient }, 'Delete client')));
+
+    const cats = h('div', { class: 'cats' }, h('span', { class: 'eyebrow' }, 'Categories'),
+      c.categories.map((x) => h('button', { class: `cat${x.id === S.catId ? ' on' : ''}`, onclick: () => { S.catId = x.id; render(); } }, x.name, h('em', {}, String(total(x))))),
+      h('button', { class: 'cat-add', onclick: addCategory }, '+ Add category'));
+
+    const everyCat = h('div', { class: 'sec' },
+      h('div', { class: 't' }, h('b', {}, 'Every category'), h('span', {}, `Checked on all ${c.name} images`)),
+      critList(c.base_criteria, 'base'),
+      addRow('Add a criterion for every category…', (text) => UI.send('POST', `api/clients/${c.id}/criteria`, { text })));
+
+    const own = cat ? h('div', { class: 'sec' },
+      h('div', { class: 't' }, h('b', {}, `${cat.name} only`), h('span', {}, 'Added on top of the list above'),
+        h('span', { style: 'margin-left:auto;display:flex;gap:14px' }, h('button', { class: 'link', onclick: () => renameCategory(cat) }, 'Rename'), h('button', { class: 'link danger', onclick: () => deleteCategory(cat) }, 'Delete'))),
+      critList(cat.criteria, 'cat'),
+      addRow(`Add a criterion for ${cat.name}…`, (text) => UI.send('POST', `api/categories/${cat.id}/criteria`, { text })))
+      : h('div', { class: 'note' }, 'Add a category to give it its own criteria.');
+
+    const { ready_at: r, needs_at: n } = S.thr;
+    const settings = h('div', { class: 'col settings' },
+      h('div', { class: 'panel' }, h('b', { class: 'h' }, 'Verdict thresholds'),
+        h('div', { class: 'thr' }, h('span', { style: `flex:${n};background:var(--fails)` }), h('span', { style: `flex:${r - n};background:var(--needs)` }), h('span', { style: `flex:${100 - r};background:var(--ready)` })),
+        h('div', { class: 'thr-l' },
+          h('span', {}, h('b', { style: 'color:var(--ready)' }, `${r}+`), ' Ready for proofing'),
+          h('span', {}, h('b', { style: 'color:var(--needs)' }, `${n}–${r - 1}`), ' Needs revisions'),
+          h('span', {}, h('b', { style: 'color:var(--fails)' }, `Under ${n}`), ' Fails'))),
+      h('div', { class: 'panel' }, h('b', { class: 'h' }, 'Brand reference'),
+        h('div', { class: 'logo-box' }, c.logo_path ? h('img', { src: `uploads/${c.logo_path}`, alt: `${c.name} logo` }) : h('span', {}, 'client logo')),
+        h('button', { class: 'btn ghost', onclick: () => $('logo-input').click() }, c.logo_path ? 'Replace logo' : 'Upload logo'),
+        h('span', { class: 'note' }, 'Shown as the client tile. It is not yet sent to the AI as a reference.')));
+
+    page.replaceChildren(header, h('div', { class: 'tabs' }, h('span', {}, 'AI criteria')),
+      h('div', { class: 'crit' }, cats, h('div', { class: 'col' }, everyCat, own), settings));
   }
 
-  function renderDetail(client) {
-    detailEl.innerHTML = '';
-
-    // Name + delete
-    const headerRow = document.createElement('div');
-    headerRow.className = 'client-header-row';
-
-    const nameGroup = document.createElement('div');
-    const nameLabel = document.createElement('label');
-    nameLabel.className = 'field-label';
-    nameLabel.textContent = 'Client name';
-    const nameInput = document.createElement('input');
-    nameInput.className = 'text-input';
-    nameInput.value = client.name;
-    nameInput.addEventListener('change', () => {
-      saveClientField(client.id, { name: nameInput.value.trim() || client.name });
-    });
-    nameGroup.appendChild(nameLabel);
-    nameGroup.appendChild(nameInput);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn btn-danger';
-    deleteBtn.textContent = 'Delete client';
-    deleteBtn.addEventListener('click', () => deleteClient(client.id));
-
-    headerRow.appendChild(nameGroup);
-    headerRow.appendChild(deleteBtn);
-    detailEl.appendChild(headerRow);
-
-    // Notes
-    const notesGroup = document.createElement('div');
-    notesGroup.className = 'field-group';
-    const notesLabel = document.createElement('label');
-    notesLabel.className = 'field-label';
-    notesLabel.textContent = 'Notes';
-    const notesInput = document.createElement('textarea');
-    notesInput.className = 'text-input';
-    notesInput.value = client.notes || '';
-    notesInput.addEventListener('change', () => {
-      saveClientField(client.id, { notes: notesInput.value });
-    });
-    notesGroup.appendChild(notesLabel);
-    notesGroup.appendChild(notesInput);
-    detailEl.appendChild(notesGroup);
-
-    // Branding logo
-    const logoGroup = document.createElement('div');
-    logoGroup.className = 'field-group';
-    const logoLabel = document.createElement('label');
-    logoLabel.className = 'field-label';
-    logoLabel.textContent = 'Branding logo';
-    logoGroup.appendChild(logoLabel);
-
-    const logoBox = document.createElement('div');
-    logoBox.className = 'logo-preview-box';
-    if (client.logo_path) {
-      const img = document.createElement('img');
-      img.src = `uploads/${client.logo_path}`;
-      img.alt = `${client.name} logo`;
-      logoBox.appendChild(img);
-    } else {
-      const placeholder = document.createElement('span');
-      placeholder.className = 'logo-placeholder';
-      placeholder.textContent = 'No logo uploaded yet.';
-      logoBox.appendChild(placeholder);
-    }
-    logoGroup.appendChild(logoBox);
-
-    const logoInput = document.createElement('input');
-    logoInput.type = 'file';
-    logoInput.accept = 'image/*';
-    logoInput.addEventListener('change', () => {
-      if (logoInput.files[0]) uploadLogo(client.id, logoInput.files[0]);
-    });
-    logoGroup.appendChild(logoInput);
-    detailEl.appendChild(logoGroup);
-
-    // Categories + criteria
-    const categoriesHeading = document.createElement('h3');
-    categoriesHeading.className = 'detail-subheading';
-    categoriesHeading.textContent = 'Image categories & criteria';
-    detailEl.appendChild(categoriesHeading);
-
-    const categoriesHint = document.createElement('p');
-    categoriesHint.className = 'hint';
-    categoriesHint.textContent = 'Each category has its own criteria. On the Review page, picking this client then a category loads that category\'s criteria automatically.';
-    detailEl.appendChild(categoriesHint);
-
-    const categoriesWrap = document.createElement('div');
-    categoriesWrap.className = 'category-list';
-    (client.categories || []).forEach((cat) => {
-      categoriesWrap.appendChild(renderCategorySection(cat, client));
-    });
-    detailEl.appendChild(categoriesWrap);
-
-    const addCatForm = document.createElement('form');
-    addCatForm.className = 'criteria-form add-category-form';
-    const addCatInput = document.createElement('input');
-    addCatInput.type = 'text';
-    addCatInput.placeholder = 'New category name (e.g. Banner Ad)…';
-    addCatInput.autocomplete = 'off';
-    const addCatBtn = document.createElement('button');
-    addCatBtn.type = 'submit';
-    addCatBtn.className = 'btn btn-secondary';
-    addCatBtn.textContent = '+ Add Category';
-    addCatForm.appendChild(addCatInput);
-    addCatForm.appendChild(addCatBtn);
-    addCatForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = addCatInput.value.trim();
-      if (!name) return;
-      await fetch(`api/clients/${client.id}/categories`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      await refreshDetail(client.id);
-    });
-    detailEl.appendChild(addCatForm);
-  }
-
-  function renderCategorySection(cat, client) {
-    const section = document.createElement('div');
-    section.className = 'category-section';
-
-    const header = document.createElement('div');
-    header.className = 'category-section-header';
-
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'text-input category-name-input';
-    nameInput.value = cat.name;
-    nameInput.addEventListener('change', async () => {
-      const name = nameInput.value.trim() || cat.name;
-      await fetch(`api/categories/${cat.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      await refreshDetail(client.id);
-    });
-
-    const deleteCatBtn = document.createElement('button');
-    deleteCatBtn.type = 'button';
-    deleteCatBtn.className = 'btn btn-danger btn-small';
-    deleteCatBtn.textContent = 'Delete category';
-    deleteCatBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete the "${cat.name}" category and all its criteria? This cannot be undone.`)) return;
-      await fetch(`api/categories/${cat.id}`, { method: 'DELETE' });
-      await refreshDetail(client.id);
-    });
-
-    header.appendChild(nameInput);
-    header.appendChild(deleteCatBtn);
-    section.appendChild(header);
-
-    const critList = document.createElement('ul');
-    critList.className = 'criteria-list';
-    (cat.criteria || []).forEach((crit) => {
-      const li = document.createElement('li');
-      li.className = 'criteria-item';
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = crit.text;
-      input.addEventListener('change', () => {
-        updateCriterion(crit.id, input.value.trim() || crit.text, client.id);
-      });
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.innerHTML = '&times;';
-      removeBtn.title = 'Remove criterion';
-      removeBtn.addEventListener('click', () => deleteCriterion(crit.id, client.id));
-
-      li.appendChild(input);
-      li.appendChild(removeBtn);
-      critList.appendChild(li);
-    });
-    section.appendChild(critList);
-
-    if (!cat.criteria || !cat.criteria.length) {
-      const emptyHint = document.createElement('p');
-      emptyHint.className = 'hint';
-      emptyHint.textContent = 'No criteria yet for this category.';
-      section.appendChild(emptyHint);
-    }
-
-    const critForm = document.createElement('form');
-    critForm.className = 'criteria-form';
-    const critInput = document.createElement('input');
-    critInput.type = 'text';
-    critInput.placeholder = `Add a criterion for ${cat.name}…`;
-    critInput.autocomplete = 'off';
-    const critBtn = document.createElement('button');
-    critBtn.type = 'submit';
-    critBtn.className = 'btn btn-secondary';
-    critBtn.textContent = 'Add';
-    critForm.appendChild(critInput);
-    critForm.appendChild(critBtn);
-    critForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const text = critInput.value.trim();
-      if (!text) return;
-      await fetch(`api/categories/${cat.id}/criteria`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      await refreshDetail(client.id);
-    });
-    section.appendChild(critForm);
-
-    return section;
-  }
-
-  async function refreshDetail(clientId) {
-    const res = await fetch(`api/clients/${clientId}`);
-    if (res.ok) renderDetail(await res.json());
-  }
-
-  async function saveClientField(id, patch) {
-    try {
-      const res = await fetch(`api/clients/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => res.statusText);
-        alert(`Could not save: ${detail}`);
-      }
-    } finally {
-      await loadClients();
-    }
-  }
-
-  async function uploadLogo(id, file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch(`api/clients/${id}/logo`, { method: 'POST', body: formData });
-      if (res.ok) {
-        renderDetail(await res.json());
-      } else {
-        const detail = await res.text().catch(() => res.statusText);
-        alert(`Logo upload failed: ${detail}`);
-      }
-    } catch (err) {
-      alert(`Logo upload failed: ${err.message}`);
-    }
-  }
-
-  async function updateCriterion(criterionId, text, clientId) {
-    await fetch(`api/criteria/${criterionId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    await refreshDetail(clientId);
-  }
-
-  async function deleteCriterion(criterionId, clientId) {
-    await fetch(`api/criteria/${criterionId}`, { method: 'DELETE' });
-    await refreshDetail(clientId);
-  }
-
-  async function deleteClient(id) {
-    if (!confirm('Delete this client and all of their categories/criteria? Reviews already saved for this client are kept, but will show as having no client. This cannot be undone.')) return;
-    await fetch(`api/clients/${id}`, { method: 'DELETE' });
-    selectedId = null;
-    detailEl.innerHTML = '<p class="hint">Select a client on the left, or add a new one, to manage their categories and criteria.</p>';
-    await loadClients();
-  }
-
-  loadClients();
+  UI.api('api/health').then((d) => { S.thr = d; }).catch(() => {}).then(() => loadList()).catch((e) => UI.toast(e.message));
 })();
