@@ -20,7 +20,7 @@
 
 const ReviewEngine = (() => {
 
-  const API_ENDPOINT = '/api/review';
+  const API_ENDPOINT = 'api/review';
 
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {

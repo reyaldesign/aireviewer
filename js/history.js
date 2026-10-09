@@ -27,7 +27,7 @@
 
   async function loadClientOptions() {
     try {
-      const res = await fetch('/api/clients');
+      const res = await fetch('api/clients');
       if (!res.ok) return;
       const clients = await res.json();
       clients.forEach((c) => {
@@ -54,7 +54,7 @@
     }
 
     try {
-      const res = await fetch(`/api/clients/${clientId}/categories`);
+      const res = await fetch(`api/clients/${clientId}/categories`);
       if (!res.ok) return;
       const categories = await res.json();
       categories.forEach((cat) => {
@@ -75,7 +75,7 @@
     const params = new URLSearchParams();
     if (clientId) params.set('client_id', clientId);
     if (categoryId) params.set('category_id', categoryId);
-    const url = params.toString() ? `/api/reviews?${params.toString()}` : '/api/reviews';
+    const url = params.toString() ? `api/reviews?${params.toString()}` : 'api/reviews';
     try {
       const res = await fetch(url);
       reviews = res.ok ? await res.json() : [];
@@ -159,7 +159,7 @@
     deleteBtn.textContent = 'Delete this review';
     deleteBtn.addEventListener('click', async () => {
       if (!confirm('Delete this saved review and its image? This cannot be undone.')) return;
-      await fetch(`/api/reviews/${r.id}`, { method: 'DELETE' });
+      await fetch(`api/reviews/${r.id}`, { method: 'DELETE' });
       detailPanel.hidden = true;
       await loadReviews();
     });

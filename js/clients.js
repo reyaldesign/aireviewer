@@ -19,7 +19,7 @@
 
   async function loadClients() {
     try {
-      const res = await fetch('/api/clients');
+      const res = await fetch('api/clients');
       clients = res.ok ? await res.json() : [];
     } catch (err) {
       clients = [];
@@ -50,7 +50,7 @@
     const name = newClientNameInput.value.trim();
     if (!name) return;
     try {
-      const res = await fetch('/api/clients', {
+      const res = await fetch('api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -73,7 +73,7 @@
     selectedId = id;
     renderList();
     try {
-      const res = await fetch(`/api/clients/${id}`);
+      const res = await fetch(`api/clients/${id}`);
       if (!res.ok) return;
       renderDetail(await res.json());
     } catch (err) {
@@ -139,7 +139,7 @@
     logoBox.className = 'logo-preview-box';
     if (client.logo_path) {
       const img = document.createElement('img');
-      img.src = `/uploads/${client.logo_path}`;
+      img.src = `uploads/${client.logo_path}`;
       img.alt = `${client.name} logo`;
       logoBox.appendChild(img);
     } else {
@@ -193,7 +193,7 @@
       e.preventDefault();
       const name = addCatInput.value.trim();
       if (!name) return;
-      await fetch(`/api/clients/${client.id}/categories`, {
+      await fetch(`api/clients/${client.id}/categories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -216,7 +216,7 @@
     nameInput.value = cat.name;
     nameInput.addEventListener('change', async () => {
       const name = nameInput.value.trim() || cat.name;
-      await fetch(`/api/categories/${cat.id}`, {
+      await fetch(`api/categories/${cat.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -230,7 +230,7 @@
     deleteCatBtn.textContent = 'Delete category';
     deleteCatBtn.addEventListener('click', async () => {
       if (!confirm(`Delete the "${cat.name}" category and all its criteria? This cannot be undone.`)) return;
-      await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' });
+      await fetch(`api/categories/${cat.id}`, { method: 'DELETE' });
       await refreshDetail(client.id);
     });
 
@@ -286,7 +286,7 @@
       e.preventDefault();
       const text = critInput.value.trim();
       if (!text) return;
-      await fetch(`/api/categories/${cat.id}/criteria`, {
+      await fetch(`api/categories/${cat.id}/criteria`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -299,13 +299,13 @@
   }
 
   async function refreshDetail(clientId) {
-    const res = await fetch(`/api/clients/${clientId}`);
+    const res = await fetch(`api/clients/${clientId}`);
     if (res.ok) renderDetail(await res.json());
   }
 
   async function saveClientField(id, patch) {
     try {
-      const res = await fetch(`/api/clients/${id}`, {
+      const res = await fetch(`api/clients/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -323,7 +323,7 @@
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch(`/api/clients/${id}/logo`, { method: 'POST', body: formData });
+      const res = await fetch(`api/clients/${id}/logo`, { method: 'POST', body: formData });
       if (res.ok) {
         renderDetail(await res.json());
       } else {
@@ -336,7 +336,7 @@
   }
 
   async function updateCriterion(criterionId, text, clientId) {
-    await fetch(`/api/criteria/${criterionId}`, {
+    await fetch(`api/criteria/${criterionId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
@@ -345,13 +345,13 @@
   }
 
   async function deleteCriterion(criterionId, clientId) {
-    await fetch(`/api/criteria/${criterionId}`, { method: 'DELETE' });
+    await fetch(`api/criteria/${criterionId}`, { method: 'DELETE' });
     await refreshDetail(clientId);
   }
 
   async function deleteClient(id) {
     if (!confirm('Delete this client and all of their categories/criteria? Reviews already saved for this client are kept, but will show as having no client. This cannot be undone.')) return;
-    await fetch(`/api/clients/${id}`, { method: 'DELETE' });
+    await fetch(`api/clients/${id}`, { method: 'DELETE' });
     selectedId = null;
     detailEl.innerHTML = '<p class="hint">Select a client on the left, or add a new one, to manage their categories and criteria.</p>';
     await loadClients();

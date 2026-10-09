@@ -95,7 +95,7 @@
   // it shows up filtered under that client in Previous Reviews.
   async function loadClientOptions() {
     try {
-      const res = await fetch('/api/clients');
+      const res = await fetch('api/clients');
       if (!res.ok) return;
       const clients = await res.json();
       clientSelect.innerHTML = '<option value="">No client (use criteria below)</option>';
@@ -122,12 +122,12 @@
     if (!state.clientId) return;
 
     try {
-      const res = await fetch(`/api/clients/${state.clientId}`);
+      const res = await fetch(`api/clients/${state.clientId}`);
       if (!res.ok) return;
       const c = await res.json();
 
       if (c.logo_path) {
-        clientLogoImg.src = `/uploads/${c.logo_path}`;
+        clientLogoImg.src = `uploads/${c.logo_path}`;
         clientLogoPreview.hidden = false;
       }
 
@@ -348,7 +348,7 @@
 
   async function updateUsageWidget() {
     try {
-      const res = await fetch('/api/usage');
+      const res = await fetch('api/usage');
       if (!res.ok) return;
       const data = await res.json();
       usageRequestsEl.textContent = data.requests.toLocaleString();
@@ -365,7 +365,7 @@
 
   async function checkBackendStatus() {
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch('api/health');
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
 

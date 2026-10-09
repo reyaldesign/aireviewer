@@ -363,7 +363,7 @@ def sanitize_checks(checks: list) -> list:
 def review_to_response(review: dict) -> dict:
     """Adds a browser-usable image URL to a review dict from the database."""
     review = dict(review)
-    review["image_url"] = f"/uploads/{review['image_path']}"
+    review["image_url"] = f"uploads/{review['image_path']}"
     return review
 
 
